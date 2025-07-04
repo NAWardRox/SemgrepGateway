@@ -5,19 +5,21 @@ Deploy:
 ```bash
 git clone <repo> && cd semgrep-api
 ./deploy.sh
-
+````
 
 ## Usage
-```bash
+```
 # Scan code
 curl -X POST http://localhost:8000/scan \
   -H "Content-Type: application/json" \
   -d '{"code": "print(\"hello\")", "language": "python"}'
-
+```
 # Health check
+```
 curl http://localhost:8000/health
-
+```
 # Docs
+```
 open http://localhost:8000/docs
 ```
 
