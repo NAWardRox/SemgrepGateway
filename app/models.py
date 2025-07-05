@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
@@ -10,12 +10,23 @@ class SeverityLevel(str, Enum):
 
 
 class ScanRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "code": "import os\nos.system('ls')",
+                "language": "python",
+                "config": "auto"
+            }
+        }
+    )
+
     code: str = Field(..., min_length=1, max_length=1000000, description="Code to scan")
     language: str = Field(..., min_length=1, max_length=50, description="Programming language")
-    rules: Optional[List[str]] = Field(None, max_items=50, description="Custom rules")
+    rules: Optional[List[str]] = Field(None, max_length=50, description="Custom rules")
     config: Optional[str] = Field(None, max_length=200, description="Semgrep config")
 
-    @validator('language')
+    @field_validator('language')
+    @classmethod
     def validate_language(cls, v):
         supported_languages = {
             'python', 'javascript', 'typescript', 'java', 'go', 'php',
@@ -25,33 +36,10 @@ class ScanRequest(BaseModel):
             raise ValueError(f"Language '{v}' not supported. Supported: {', '.join(supported_languages)}")
         return v.lower()
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "code": "import os\nos.system('ls')",
-                "language": "python",
-                "config": "auto"
-            }
-        }
-
 
 class BulkScanRequest(BaseModel):
-    files: List[Dict[str, str]] = Field(..., min_items=1, max_items=50, description="Files to scan")
-    config: Optional[str] = Field(None, max_length=200, description="Semgrep config")
-
-    @validator('files')
-    def validate_files(cls, v):
-        for i, file_data in enumerate(v):
-            if 'filename' not in file_data or 'content' not in file_data:
-                raise ValueError(f"File {i}: Each file must have 'filename' and 'content' fields")
-            if not file_data['filename'].strip():
-                raise ValueError(f"File {i}: filename cannot be empty")
-            if len(file_data['content']) > 10 * 1024 * 1024:  # 10MB
-                raise ValueError(f"File {file_data['filename']}: content too large (max 10MB)")
-        return v
-
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "files": [
                     {
@@ -66,17 +54,27 @@ class BulkScanRequest(BaseModel):
                 "config": "auto"
             }
         }
+    )
+
+    files: List[Dict[str, str]] = Field(..., min_length=1, max_length=50, description="Files to scan")
+    config: Optional[str] = Field(None, max_length=200, description="Semgrep config")
+
+    @field_validator('files')
+    @classmethod
+    def validate_files(cls, v):
+        for i, file_data in enumerate(v):
+            if 'filename' not in file_data or 'content' not in file_data:
+                raise ValueError(f"File {i}: Each file must have 'filename' and 'content' fields")
+            if not file_data['filename'].strip():
+                raise ValueError(f"File {i}: filename cannot be empty")
+            if len(file_data['content']) > 10 * 1024 * 1024:  # 10MB
+                raise ValueError(f"File {file_data['filename']}: content too large (max 10MB)")
+        return v
 
 
 class ScanResult(BaseModel):
-    findings: List[Dict[str, Any]] = Field(default_factory=list, description="Security findings")
-    errors: List[str] = Field(default_factory=list, description="Scan errors")
-    stats: Dict[str, Any] = Field(default_factory=dict, description="Scan statistics")
-    execution_time: float = Field(default=0.0, description="Execution time in seconds")
-    files_scanned: List[str] = Field(default_factory=list, description="Files that were scanned")
-
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "findings": [
                     {
@@ -97,17 +95,18 @@ class ScanResult(BaseModel):
                 "files_scanned": ["app.py"]
             }
         }
+    )
+
+    findings: List[Dict[str, Any]] = Field(default_factory=list, description="Security findings")
+    errors: List[str] = Field(default_factory=list, description="Scan errors")
+    stats: Dict[str, Any] = Field(default_factory=dict, description="Scan statistics")
+    execution_time: float = Field(default=0.0, description="Execution time in seconds")
+    files_scanned: List[str] = Field(default_factory=list, description="Files that were scanned")
 
 
 class HealthCheck(BaseModel):
-    status: str = Field(..., description="Service status")
-    timestamp: float = Field(..., description="Timestamp")
-    version: str = Field(..., description="API version")
-    semgrep_version: Optional[str] = Field(None, description="Semgrep version")
-    uptime: float = Field(default=0.0, description="Service uptime in seconds")
-
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status": "healthy",
                 "timestamp": 1634567890.123,
@@ -116,6 +115,13 @@ class HealthCheck(BaseModel):
                 "uptime": 3600.0
             }
         }
+    )
+
+    status: str = Field(..., description="Service status")
+    timestamp: float = Field(..., description="Timestamp")
+    version: str = Field(..., description="API version")
+    semgrep_version: Optional[str] = Field(None, description="Semgrep version")
+    uptime: float = Field(default=0.0, description="Service uptime in seconds")
 
 
 class APIResponse(BaseModel):
@@ -155,20 +161,8 @@ class Finding(BaseModel):
 
 # Additional models for extended functionality
 class CustomRule(BaseModel):
-    id: str = Field(..., min_length=1, max_length=100, description="Rule ID")
-    pattern: str = Field(..., min_length=1, max_length=1000, description="Semgrep pattern")
-    language: str = Field(..., min_length=1, max_length=50, description="Target language")
-    message: str = Field(..., min_length=1, max_length=500, description="Rule message")
-    severity: SeverityLevel = Field(default=SeverityLevel.INFO, description="Rule severity")
-
-    @validator('id')
-    def validate_id(cls, v):
-        if not v.replace('_', '').replace('-', '').replace('.', '').isalnum():
-            raise ValueError("Rule ID must contain only alphanumeric characters, hyphens, underscores, and dots")
-        return v
-
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "custom.dangerous.eval",
                 "pattern": "eval($X)",
@@ -177,14 +171,25 @@ class CustomRule(BaseModel):
                 "severity": "ERROR"
             }
         }
+    )
+
+    id: str = Field(..., min_length=1, max_length=100, description="Rule ID")
+    pattern: str = Field(..., min_length=1, max_length=1000, description="Semgrep pattern")
+    language: str = Field(..., min_length=1, max_length=50, description="Target language")
+    message: str = Field(..., min_length=1, max_length=500, description="Rule message")
+    severity: SeverityLevel = Field(default=SeverityLevel.INFO, description="Rule severity")
+
+    @field_validator('id')
+    @classmethod
+    def validate_id(cls, v):
+        if not v.replace('_', '').replace('-', '').replace('.', '').isalnum():
+            raise ValueError("Rule ID must contain only alphanumeric characters, hyphens, underscores, and dots")
+        return v
 
 
 class RulesResponse(BaseModel):
-    rules: List[str] = Field(..., description="Available Semgrep rules")
-    total: int = Field(..., description="Total number of rules")
-
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "rules": [
                     "p/python",
@@ -195,3 +200,7 @@ class RulesResponse(BaseModel):
                 "total": 150
             }
         }
+    )
+
+    rules: List[str] = Field(..., description="Available Semgrep rules")
+    total: int = Field(..., description="Total number of rules")
