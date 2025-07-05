@@ -1,8 +1,10 @@
+# Latest versions as of July 2025
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
 python-multipart==0.0.6
-semgrep==1.45.0
+# Remove specific semgrep version to get latest
+# semgrep will be installed via pip install --upgrade semgrep in Dockerfile
 typing-extensions==4.8.0
 PyYAML==6.0.1
