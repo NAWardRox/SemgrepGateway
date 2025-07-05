@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Integrated Deploy Script with Automatic Rules Setup
+# Fixed Deploy Script with Permission Handling
 set -e
 
 # Colors
@@ -20,6 +20,29 @@ echo -e "${CYAN}🚀 Semgrep API - Complete Deployment${NC}"
 echo -e "${CYAN}====================================${NC}"
 echo
 
+# Function to create directories with proper permissions
+create_directories() {
+    local dirs=("$@")
+    for dir in "${dirs[@]}"; do
+        if [ ! -d "$dir" ]; then
+            echo -n "Creating $dir ... "
+            if mkdir -p "$dir" 2>/dev/null; then
+                echo -e "${GREEN}✓${NC}"
+            elif sudo mkdir -p "$dir" 2>/dev/null; then
+                echo -e "${YELLOW}✓ (with sudo)${NC}"
+                # Fix ownership
+                sudo chown -R $USER:$USER "$dir" 2>/dev/null || true
+            else
+                echo -e "${RED}✗ Failed to create $dir${NC}"
+                echo "Please run: sudo mkdir -p $dir && sudo chown -R \$USER:\$USER $dir"
+                return 1
+            fi
+        else
+            echo -e "${GREEN}✓ $dir exists${NC}"
+        fi
+    done
+}
+
 # Step 1: Pre-deployment checks
 echo -e "${BLUE}🔍 Step 1: Pre-deployment checks...${NC}"
 
@@ -35,19 +58,53 @@ fi
 
 echo -e "${GREEN}✅ Docker and Docker Compose available${NC}"
 
-# Step 2: Setup project structure and rules
+# Step 2: Setup project structure with permission handling
 echo -e "${BLUE}🏗️ Step 2: Setting up project structure...${NC}"
 
-# Create necessary directories
-mkdir -p app/services logs rules/custom rules/downloaded
+# Try to create directories
+directories=(
+    "app/services"
+    "logs"
+    "rules"
+    "rules/custom"
+    "rules/downloaded"
+)
+
+if ! create_directories "${directories[@]}"; then
+    echo -e "${YELLOW}⚠️ Permission issues detected. Trying alternative approach...${NC}"
+
+    # Alternative: Create directories as current user with different method
+    for dir in "${directories[@]}"; do
+        if [ ! -d "$dir" ]; then
+            echo "Creating $dir with current user permissions..."
+            install -d "$dir" 2>/dev/null || {
+                echo "Manual creation required for $dir"
+                touch "${dir}_placeholder" 2>/dev/null || {
+                    echo -e "${RED}❌ Cannot create $dir. Please run:${NC}"
+                    echo "sudo mkdir -p $dir && sudo chown -R \$USER:\$USER $dir"
+                    exit 1
+                }
+                rm -f "${dir}_placeholder"
+                mkdir -p "$dir"
+            }
+        fi
+    done
+fi
 
 # Ensure __init__.py files exist
-touch app/__init__.py app/services/__init__.py
+touch app/__init__.py app/services/__init__.py 2>/dev/null || {
+    echo "Creating __init__.py files..."
+    echo "# Init file" > app/__init__.py
+    echo "# Init file" > app/services/__init__.py
+}
 
 # Create .env if not exists
 if [ ! -f "$ENV_FILE" ]; then
     echo -e "${YELLOW}📋 Creating environment file...${NC}"
-    cp .env.example .env 2>/dev/null || cat > .env << 'EOF'
+    if [ -f ".env.example" ]; then
+        cp .env.example .env
+    else
+        cat > .env << 'EOF'
 ENVIRONMENT=development
 HOST=0.0.0.0
 PORT=8000
@@ -57,15 +114,32 @@ SEMGREP_TIMEOUT=300
 MAX_FILE_SIZE=10485760
 MAX_FILES_PER_REQUEST=50
 EOF
+    fi
 fi
 
 echo -e "${GREEN}✅ Project structure ready${NC}"
 
-# Step 3: Auto-create custom rules
+# Step 3: Auto-create custom rules (with error handling)
 echo -e "${BLUE}🛠️ Step 3: Creating default security rules...${NC}"
 
-cat > rules/custom/security-essentials.yml << 'EOF'
-rules:
+# Function to create rule file safely
+create_rule_file() {
+    local filename="$1"
+    local content="$2"
+
+    if [ -w "$(dirname "$filename")" ]; then
+        echo "$content" > "$filename"
+        echo -e "${GREEN}✓ Created $(basename "$filename")${NC}"
+    else
+        echo -e "${YELLOW}⚠️ Cannot write to $(dirname "$filename"), creating with sudo...${NC}"
+        echo "$content" | sudo tee "$filename" > /dev/null
+        sudo chown $USER:$USER "$filename" 2>/dev/null || true
+        echo -e "${GREEN}✓ Created $(basename "$filename") (with sudo)${NC}"
+    fi
+}
+
+# Security essentials rules
+security_rules='rules:
   # Command Injection
   - id: dangerous-os-system
     pattern: os.system($CMD)
@@ -163,11 +237,10 @@ rules:
     severity: ERROR
     metadata:
       category: security
-      cwe: "CWE-502: Unsafe Deserialization"
-EOF
+      cwe: "CWE-502: Unsafe Deserialization"'
 
-cat > rules/custom/web-security.yml << 'EOF'
-rules:
+# Web security rules
+web_rules='rules:
   # XSS Prevention
   - id: xss-risk-write
     pattern: |
@@ -233,15 +306,14 @@ rules:
   - id: jwt-none-algorithm
     pattern: |
       jwt.decode($TOKEN, ..., algorithms=["none"])
-    message: "JWT 'none' algorithm is insecure"
+    message: "JWT '\''none'\'' algorithm is insecure"
     languages: [python]
     severity: ERROR
     metadata:
-      category: security
-EOF
+      category: security'
 
-cat > rules/custom/code-quality.yml << 'EOF'
-rules:
+# Code quality rules
+quality_rules='rules:
   # Exception Handling
   - id: broad-exception-catch
     pattern: |
@@ -301,8 +373,12 @@ rules:
     languages: [python, javascript, java]
     severity: WARNING
     metadata:
-      category: maintainability
-EOF
+      category: maintainability'
+
+# Create rule files
+create_rule_file "rules/custom/security-essentials.yml" "$security_rules"
+create_rule_file "rules/custom/web-security.yml" "$web_rules"
+create_rule_file "rules/custom/code-quality.yml" "$quality_rules"
 
 echo -e "${GREEN}✅ Created 3 custom rule files with 25+ security rules${NC}"
 
