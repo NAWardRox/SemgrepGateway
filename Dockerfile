@@ -1,52 +1,47 @@
-# Fixed Dockerfile - No mandatory rules directory
+# Simplified Dockerfile - Rules handled by volume mount
 
 FROM python:3.9-slim
 
-# Install system dependencies and Semgrep
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     git \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Copy and install requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Install Semgrep in the container
+# Install Semgrep
 RUN pip install --no-cache-dir semgrep
 
-# Download popular Semgrep rules during build
-RUN echo "Downloading Semgrep rules..." \
+# Pre-download popular rules (cached in image)
+RUN echo "Pre-downloading popular Semgrep rules..." \
     && semgrep --config=p/security-audit --dry-run /tmp >/dev/null 2>&1 || true \
     && semgrep --config=p/python --dry-run /tmp >/dev/null 2>&1 || true \
     && semgrep --config=p/javascript --dry-run /tmp >/dev/null 2>&1 || true \
-    && semgrep --config=p/java --dry-run /tmp >/dev/null 2>&1 || true \
     && semgrep --config=auto --dry-run /tmp >/dev/null 2>&1 || true \
-    && echo "Semgrep rules cached successfully"
+    && echo "✅ Rules pre-downloaded and cached"
 
-# Copy application files
+# Copy application
 COPY app/ app/
 
-# Copy rules directory if it exists (optional)
-COPY rules/ rules/ 2>/dev/null || echo "No rules directory found, will create empty one"
-
-# Create directories
-RUN mkdir -p logs rules/custom rules/downloaded
+# Create base directories (rules will be mounted as volume)
+RUN mkdir -p logs rules
 
 # Verify Semgrep installation
-RUN semgrep --version && echo "✅ Semgrep installed successfully"
+RUN semgrep --version
 
 # Expose port
 EXPOSE 8000
 
-# Health check that also verifies Semgrep
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8000/health && semgrep --version || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Run application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
