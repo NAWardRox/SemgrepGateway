@@ -1,4 +1,4 @@
-# Fixed Dockerfile with Semgrep pre-installed
+# Fixed Dockerfile - No mandatory rules directory
 
 FROM python:3.9-slim
 
@@ -31,10 +31,12 @@ RUN echo "Downloading Semgrep rules..." \
 
 # Copy application files
 COPY app/ app/
-COPY rules/ rules/
 
-# Create logs directory
-RUN mkdir -p logs
+# Copy rules directory if it exists (optional)
+COPY rules/ rules/ 2>/dev/null || echo "No rules directory found, will create empty one"
+
+# Create directories
+RUN mkdir -p logs rules/custom rules/downloaded
 
 # Verify Semgrep installation
 RUN semgrep --version && echo "✅ Semgrep installed successfully"
